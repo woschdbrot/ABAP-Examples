@@ -1,0 +1,193 @@
+CLASS alv_view DEFINITION.
+  PUBLIC SECTION.
+    METHODS create_guid IMPORTING it_mtz_data TYPE ANY TABLE EXPORTING et_guid TYPE ANY TABLE.
+    METHODS save_data IMPORTING it_mtz_data TYPE ANY TABLE it_guid TYPE ANY TABLE.
+    METHODS show_alv IMPORTING it_mtz_data TYPE ANY TABLE.
+    METHODS handle_double_click FOR EVENT double_click OF cl_salv_events_table IMPORTING column row sender.
+
+  PROTECTED SECTION.
+
+  PRIVATE SECTION.
+
+    METHODS start_table_backup IMPORTING it_mtz_data_bk TYPE ANY TABLE.
+    METHODS delete_mtz_data.
+    METHODS save_table CHANGING ct_mtz_data_bk TYPE ANY TABLE.
+
+ENDCLASS.
+
+CLASS alv_view IMPLEMENTATION.
+
+  METHOD start_table_backup.
+
+    MESSAGE s013. "Tabelle ZKMM_T_MTZ_DATA wird wiederhergestellt
+    LOOP AT it_mtz_data_bk ASSIGNING FIELD-SYMBOL(<mtz_data_bk>).
+      INSERT INTO zkmm_t_mtz_data VALUES <mtz_data_bk>.
+    ENDLOOP.
+
+    COMMIT WORK AND WAIT.
+    MESSAGE s014. "Tabelle ZKMM_T_MTZ_DATA wurde erfolgreich wiederhergestellt
+  ENDMETHOD.
+
+  METHOD save_table.
+    DATA: lt_mtz_data_bk TYPE TABLE OF zkmm_t_mtz_data.
+
+    MESSAGE s011."Erzeuge Backup der Tabelle ZKMM_T_MTZ_DATA
+    SELECT *
+      FROM zkmm_t_mtz_data
+      INTO TABLE lt_mtz_data_bk.
+
+    IF lt_mtz_data_bk IS NOT INITIAL.
+      ct_mtz_data_bk = lt_mtz_data_bk.
+      MESSAGE s012."Backup erfolgreich erzeugt
+    ENDIF.
+  ENDMETHOD.
+
+  METHOD delete_mtz_data.
+    MESSAGE s007. "Neu initialisieren der Tabelle ZKMM_T_MTZ_DATA
+
+    DELETE FROM zkmm_t_mtz_data.
+    COMMIT WORK AND WAIT.
+    MESSAGE s008. "Neu initialisieren erfolgreich abgeschlossen
+  ENDMETHOD.
+
+  METHOD save_data.
+
+    DATA: lt_mtz_insert_data    TYPE TABLE OF zkmm_t_mtz_data,
+          ls_mtz_insert_data    TYPE zkmm_t_mtz_data,
+          lt_mtz_insert_data_bk TYPE TABLE OF zkmm_t_mtz_data.
+
+    DATA: lt_guid     TYPE TABLE OF lty_guid,
+          lt_mtz_data TYPE TABLE OF zkmm_s_mtz_data.
+
+    MESSAGE s006."Start Speichern der MTZ Daten in Tabelle ZKMM_T_MTZ_DATA
+
+    lt_guid = it_guid.
+    lt_mtz_data = it_mtz_data.
+
+    me->save_table(
+      CHANGING
+        ct_mtz_data_bk = lt_mtz_insert_data_bk
+    ).
+    "Datenbanktabelle mit jedem Lauf neu initialisieren
+    me->delete_mtz_data( ).
+
+    MESSAGE s009. "Starte Neuaufbau der Tabelle ZKMM_T_MTZ_DATA
+    LOOP AT lt_mtz_data ASSIGNING FIELD-SYMBOL(<mtz_data>).
+
+      READ TABLE lt_guid ASSIGNING FIELD-SYMBOL(<guid>) INDEX sy-tabix.
+
+      IF <guid> IS ASSIGNED.
+        MOVE-CORRESPONDING <mtz_data> TO ls_mtz_insert_data.
+        ls_mtz_insert_data-guid = <guid>-guid16.
+        ls_mtz_insert_data-mandt = sy-mandt.
+
+        TRY.
+            APPEND ls_mtz_insert_data TO lt_mtz_insert_data.
+            INSERT INTO zkmm_t_mtz_data VALUES ls_mtz_insert_data.
+        ENDTRY.
+
+        IF sy-subrc EQ 0.
+        ELSE.
+          MESSAGE e030."Fehler bei Tabellenaufbau. Tabelle wird gelöscht und der Ursprüngliche Zustand wiederhergestellt.
+          me->delete_mtz_data( ).
+          me->start_table_backup( it_mtz_data_bk = lt_mtz_insert_data_bk ).
+        ENDIF.
+        CLEAR ls_mtz_insert_data.
+      ENDIF.
+
+      UNASSIGN <guid>.
+
+    ENDLOOP.
+
+
+    COMMIT WORK AND WAIT.
+    UNASSIGN <mtz_data>.
+
+    MESSAGE s010. "Tabelle ZKMM_T_MTZ_DATA wurde erfolgreich befüllt
+
+  ENDMETHOD.
+
+  METHOD create_guid.
+
+    DATA: s1 TYPE string.
+    DATA: lv_lines_count TYPE i.
+    DATA: lt_guid TYPE TABLE OF lty_guid,
+          ls_guid TYPE lty_guid.
+    DATA: l_uuid_x16 TYPE sysuuid_x16.
+    DATA: oref       TYPE REF TO cx_uuid_error.
+
+    MESSAGE s005. "Erzeuge Neue GUID Schlüssel für Tabelle ZKMM_T_MTZ_DATA
+
+    DESCRIBE TABLE it_mtz_data LINES lv_lines_count.
+
+
+    DO lv_lines_count TIMES.
+      TRY.
+          l_uuid_x16 = cl_system_uuid=>create_uuid_x16_static( ). " create uuid_x16
+
+
+        CATCH cx_uuid_error INTO oref.                            " catch error
+          s1 = oref->get_text( ).
+      ENDTRY.
+
+      ls_guid-guid16 = l_uuid_x16.
+      APPEND ls_guid TO lt_guid.
+      CLEAR ls_guid.
+    ENDDO.
+
+    et_guid = lt_guid.
+
+    MESSAGE s015. "GUID Schlüssel wurden erfolgreich erzeugt.
+
+  ENDMETHOD.
+
+  METHOD show_alv.
+
+    DATA: lo_alv TYPE REF TO cl_salv_table.
+    DATA: lo_columns_table TYPE REF TO cl_salv_columns_table.
+    DATA: ct_mtz_data TYPE zkmm_tt_mtz_data.
+
+
+    ct_mtz_data = it_mtz_data.
+
+    TRY.
+        CALL METHOD cl_salv_table=>factory
+*      EXPORTING
+*        list_display   = IF_SALV_C_BOOL_SAP=>FALSE    " ALV wird im Listenmodus angezeigt
+*        r_container    =     " Abstracter Container fuer GUI Controls
+*        container_name =
+          IMPORTING
+            r_salv_table = lo_alv   " Basisklasse einfache ALV Tabellen
+          CHANGING
+            t_table      = ct_mtz_data.
+      CATCH cx_salv_msg.    "
+    ENDTRY.
+
+    SET HANDLER handle_double_click FOR lo_alv->get_event( ).
+
+    lo_columns_table = lo_alv->get_columns( ).
+
+    lo_columns_table->set_optimize(
+        value = abap_true
+    ).
+
+    lo_alv->set_function( value = 'X' ).
+
+    lo_alv->set_screen_status(
+      EXPORTING
+        report        =  'SAPLKKBL'   " ABAP-Programm, aktuelles Rahmenprogramm
+        pfstatus      =  'STANDARD_FULLSCREEN'   " Bildschirmbilder, aktueller GUI-Status
+        set_functions = lo_alv->c_functions_all    " ALV: Datenelement für Konstanten
+    ).
+
+
+    IF  lo_alv IS BOUND.
+      lo_alv->display( ).
+    ENDIF.
+
+  ENDMETHOD.
+
+  METHOD handle_double_click.
+    break ranftld.
+  ENDMETHOD.
+ENDCLASS.
