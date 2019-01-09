@@ -1,0 +1,264 @@
+********************************************************************************
+*Autor: Ranftl David
+*Created: 14.07.2017
+********************************************************************************
+*Programmbeschreibung:
+*Report mit dem EQUI Labels gedruckt werden können
+********************************************************************************
+*Programmänderungen:
+*+-----------------------------------------------------------------------------+
+*|Code
+*|Name
+*|Änderungen
+*+-----------------------------------------------------------------------------+
+*|Code:
+*|AXKO123456
+*|Name
+*|John Doe
+*|Änderungen
+*|Text zu den gemachten änderungen
+*|Beschreibung was neu ist
+REPORT zkpp_print_equi_label MESSAGE-ID zkpp_msg_general.
+"Datendeklaration
+"Struktur für Aufruf Adobe Formular
+Data: ls_outputparams type sfpoutputparams,
+      ls_docparams    type sfpdocparams,
+      lv_form         type tdsfname,
+      lv_fm_name      type rs38l_fnam,
+      ls_pdf_file     type fpformoutput.
+      
+CONSTANTS lc_label_name TYPE tdsfname VALUE 'ZKPP_EQUI_LABEL'.
+
+DATA: gt_exclude TYPE TABLE OF rsexfcode WITH HEADER LINE.
+
+DATA: lt_equi_label TYPE zkpp_tt_equi_label,
+      ls_equi_label TYPE zkpp_equi_label.
+
+DATA: lo_forms TYPE REF TO zk_call_forms.
+
+DATA: lv_ok TYPE susr_bool.
+
+DATA: lv_preview TYPE susr_bool.
+
+DATA: lv_progress TYPE i.
+
+"Selektionsbildschirm
+SELECTION-SCREEN BEGIN OF BLOCK data WITH FRAME TITLE text-001.
+SELECT-OPTIONS s_equnr FOR ls_equi_label-equnr.
+SELECT-OPTIONS s_eqtyp FOR ls_equi_label-eqtyp.
+PARAMETERS p_spras TYPE eqkt-spras DEFAULT 'DE'.
+PARAMETERS p_border TYPE i DEFAULT 250.
+SELECTION-SCREEN END OF BLOCK data.
+
+
+SELECTION-SCREEN BEGIN OF BLOCK print WITH FRAME TITLE text-002.
+*SELECTION-SCREEN PUSHBUTTON /1(25) test1 USER-COMMAND test1.
+PARAMETERS p_dest TYPE rspopname.
+PARAMETERS p_copies TYPE fpcopies DEFAULT 1.
+
+*PARAMETERS p_prev RADIOBUTTON GROUP r1.
+PARAMETERS p_imme AS CHECKBOX DEFAULT 'X'.
+PARAMETERS p_reqd AS CHECKBOX.
+PARAMETERS p_ndial as CHECKBOX DEFAULT 'X'.
+SELECTION-SCREEN END OF BLOCK print.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-007.
+SELECTION-SCREEN PUSHBUTTON /1(18) prt_btn USER-COMMAND push_prt.
+SELECTION-SCREEN PUSHBUTTON 21(18) prv_btn USER-COMMAND preview.
+SELECTION-SCREEN PUSHBUTTON 41(18) spl_btn USER-COMMAND spooler.
+SELECTION-SCREEN PUSHBUTTON 61(18) ext_btn USER-COMMAND exit.
+*SELECTION-SCREEN PUSHBUTTON /1(18) TEST USER-COMMAND TEST.
+SELECTION-SCREEN END OF BLOCK b1.
+
+
+INITIALIZATION.
+
+  "F8 ausblenden
+  gt_exclude-fcode  = 'ONLI'.
+  APPEND gt_exclude.
+
+  "Beschriftung der Buttons
+  prt_btn = text-003.
+  ext_btn = text-004.
+  spl_btn = text-005.
+  prv_btn = text-006.
+
+  "Ikons auf den Grafiken hinzufügen
+  CONCATENATE '@0X@' prt_btn INTO prt_btn.
+  CONCATENATE '@0W@' ext_btn INTO ext_btn.
+  CONCATENATE '@DH@' spl_btn INTO spl_btn.
+  CONCATENATE '@0X@' prv_btn INTO prv_btn.
+
+AT SELECTION-SCREEN. "Auswerten der Gedrückten Buttons
+
+  "Eingabe der Selections Button prüfen und verarbeiten
+  CASE sy-ucomm.
+    WHEN 'PUSH_PRT' OR 'PREVIEW'. "Druck Button
+      IF sy-ucomm EQ 'PUSH_PRT'.
+        PERFORM check_printer.
+      ENDIF.
+      PERFORM select_data CHANGING lt_equi_label.
+      IF sy-ucomm EQ 'PREVIEW'.
+        MOVE 'X' TO lv_preview.
+      ELSE.
+        CLEAR lv_preview.
+      ENDIF.
+
+      PERFORM print_data USING lt_equi_label lc_label_name CHANGING lv_ok.
+
+      IF lv_ok EQ 'X'.
+        IF lv_preview EQ 'X'.
+          MESSAGE s010.
+        ELSE.
+          MESSAGE s000.
+        ENDIF.
+
+      ENDIF.
+
+      CLEAR lv_ok.
+    WHEN 'EXIT'. "Verlassen der Transaktion
+      CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
+        EXPORTING
+          percentage = 50
+          text       = 'Beende Programm'.
+
+      MESSAGE s004 WITH sy-cprog.
+
+      WAIT UP TO 1 SECONDS.
+      CALL FUNCTION 'SAPGUI_PROGRESS_INDICATOR'
+        EXPORTING
+          percentage = 100.
+
+      LEAVE PROGRAM.
+    WHEN 'SPOOLER'. "Aufruf des Benutzer Spoolers
+      MESSAGE s008 WITH sy-uname.
+      CALL TRANSACTION 'SP02' WITH AUTHORITY-CHECK.
+
+      MESSAGE s009.
+      LEAVE SCREEN.
+    WHEN OTHERS.
+  ENDCASE.
+
+
+  "Erstmaliger Aufruf des Reports
+
+AT SELECTION-SCREEN OUTPUT.
+
+  "Verändern der Menüleisten. Entfernen ds F8 Buttons
+  CALL FUNCTION 'RS_SET_SELSCREEN_STATUS'
+    EXPORTING
+      p_status  = '%_00'
+      p_program = 'RSSYSTDB'
+    TABLES
+      p_exclude = gt_exclude[].
+
+  "Druckgrenze zur Eingabe Sperren damit sie sich nicht geändert werden kann.
+  LOOP AT SCREEN.
+    IF screen-name EQ 'P_BORDER'.
+      screen-input = 0.
+*      screen-active = 0.
+    ENDIF.
+
+    MODIFY SCREEN.
+  ENDLOOP.
+
+
+START-OF-SELECTION.
+
+
+*&---------------------------------------------------------------------*
+*&      Form  SELECT_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      <--P_LT_EQUI_LABEL  text
+*----------------------------------------------------------------------*
+FORM select_data  CHANGING p_lt_equi_label TYPE zkpp_tt_equi_label.
+
+  DATA: lv_line TYPE i.
+
+  SELECT t1~equnr, t1~serge, t2~eqktx AS maktx
+  FROM equi AS t1
+  LEFT JOIN eqkt AS t2 ON t1~equnr EQ t2~equnr AND t2~spras EQ @p_spras
+  INTO CORRESPONDING FIELDS OF TABLE @p_lt_equi_label
+  WHERE t1~equnr IN @s_equnr
+    AND t1~eqtyp IN @s_eqtyp.
+
+
+  IF sy-subrc EQ 0.
+    MESSAGE s003.
+
+    DESCRIBE TABLE p_lt_equi_label LINES lv_line.
+
+    IF lv_line GE p_border.
+      MESSAGE e007 WITH p_border lv_line.
+      LEAVE SCREEN.
+    ENDIF.
+  ELSE.
+    MESSAGE e005.
+    LEAVE SCREEN.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  PRINT_DATA
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*      -->P_LT_EQUI_LABEL  text
+*----------------------------------------------------------------------*
+FORM print_data  USING    p_lt_equi_label TYPE zkpp_tt_equi_label lv_form TYPE tdsfname CHANGING lv_ok.
+
+  CREATE OBJECT lo_forms.
+
+
+  ls_outputparams-dest = p_dest.
+  ls_outputparams-reqnew = 'X'.
+  ls_outputparams-preview = lv_preview.
+  ls_outputparams-reqimm = 'x'.
+  ls_outputparams-nodialog = p_ndial.
+  ls_outputparams-reqdel = 'X'.
+  ls_outputparams-copies = p_copies.
+
+
+  lo_forms->get_pdf_function(
+    EXPORTING
+      iv_form_name     =  lv_form   " Name eines Formularobjektes
+    IMPORTING
+      ev_function_name =  lv_fm_name   " Name des Funktionsbausteins
+  ).
+
+  IF lv_fm_name IS NOT INITIAL.
+    lo_forms->start_print_job( is_outputparams = ls_outputparams ).
+
+    ls_docparams-langu = 'DE'.
+
+    CALL FUNCTION lv_fm_name
+      EXPORTING
+        is_docparams  = ls_docparams   " Formularverarbeitung Formularparameter
+        it_equi_label = p_lt_equi_label.
+
+    lo_forms->close_print_job( ).
+
+    IF  sy-subrc EQ 0.
+      MOVE 'X' TO lv_ok.
+    ELSE.
+      MESSAGE e002.
+    ENDIF.
+
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*&      Form  CHECK_PRINTER
+*&---------------------------------------------------------------------*
+*       text
+*----------------------------------------------------------------------*
+*  -->  p1        text
+*  <--  p2        text
+*----------------------------------------------------------------------*
+FORM check_printer .
+  IF p_dest IS INITIAL.
+    MESSAGE e006.
+  ENDIF.
+ENDFORM.
