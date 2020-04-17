@@ -1,0 +1,136 @@
+    DATA: gr_docking        TYPE REF TO cl_gui_docking_container,
+          gr_split          TYPE REF TO cl_gui_easy_splitter_container,
+          gr_alv_label_mat  TYPE REF TO cl_gui_alv_grid,
+          gr_alv_label_data TYPE REF TO cl_gui_alv_grid,
+          gr_cont_top       TYPE REF TO cl_gui_container,
+          gr_cont_bot       TYPE REF TO cl_gui_container,
+          gv_extension      TYPE i.
+
+    DATA: it_fieldcat_head TYPE lvc_t_fcat.
+
+*    DATA: gt_label_mat  TYPE TABLE OF zkpp_t_lab_bew,
+*          gt_label_data TYPE TABLE OF zkpp_t_labmj00.
+
+    DATA: lref_consumer     TYPE REF TO cl_gui_props_consumer,
+          ls_metric_factors TYPE cntl_metric_factors.
+
+    lref_consumer = cl_gui_props_consumer=>create_consumer( ).
+    ls_metric_factors = lref_consumer->get_metric_factors( ).
+
+    DATA(lv_pixels) = ls_metric_factors-screen-x * ls_metric_factors-screen-y.
+
+    IF ls_metric_factors-screen-y > 0.
+
+    ENDIF.
+
+    IF lv_pixels > 3580000.
+      gv_extension = 460.
+    ELSEIF lv_pixels > 2130000.
+      gv_extension = 260.
+    ELSE.
+      gv_extension = 215.
+    ENDIF.
+
+* dockingcontainer erzeugen
+    CREATE OBJECT gr_docking
+      EXPORTING
+        side      = cl_gui_docking_container=>dock_at_bottom
+        extension = gv_extension.
+
+* DockingContainer splitten
+    CREATE OBJECT gr_split
+      EXPORTING
+        parent      = gr_docking
+        orientation = 0.
+
+
+    gr_cont_top = gr_split->top_left_container.
+    gr_cont_bot = gr_split->bottom_right_container.
+
+* 1. ALV
+    CREATE OBJECT gr_alv_label_mat
+      EXPORTING
+        i_parent      = gr_cont_top
+        i_appl_events = 'X'.
+
+
+    is_label_mat_layout-sel_mode = 'B'.
+    is_label_mat_layout-cwidth_opt = abap_true.
+    is_label_mat_layout-zebra = abap_true.
+
+
+
+    "Kopfdaten anzeigen
+    CALL METHOD gr_alv_label_mat->set_table_for_first_display
+      EXPORTING
+        i_save           = space
+        i_default        = 'X'
+        i_structure_name = 'ZKPP_S_BEW_HEAD_DATA'
+        is_layout        = is_label_mat_layout
+      CHANGING
+        it_outtab        = gt_label_mat
+      EXCEPTIONS
+        OTHERS           = 4.
+
+    gr_alv_label_mat->get_frontend_fieldcatalog(
+  IMPORTING
+    et_fieldcatalog =  it_fieldcat_head   " Feldkatalog
+).
+
+    LOOP AT it_fieldcat_head ASSIGNING FIELD-SYMBOL(<fieldcat_head>).
+      CASE <fieldcat_head>-fieldname.
+        WHEN 'MATNR'.
+          <fieldcat_head>-key = abap_true.
+        WHEN 'AUFNR'.
+          <fieldcat_head>-key = abap_true.
+        WHEN 'SERNR'.
+          <fieldcat_head>-key = abap_true.
+        WHEN 'LABIN'.
+          <fieldcat_head>-key = abap_true.
+        WHEN 'LABLO'.
+          <fieldcat_head>-key = abap_true.
+        WHEN 'POSNR'.
+          <fieldcat_head>-key = abap_true.
+      ENDCASE.
+
+    ENDLOOP.
+
+    gr_alv_label_mat->set_frontend_fieldcatalog( it_fieldcatalog = it_fieldcat_head ).
+
+
+* 2. ALV
+    CREATE OBJECT gr_alv_label_data
+      EXPORTING
+        i_parent      = gr_cont_bot
+        i_appl_events = 'X'.
+
+
+    is_label_data_layout-cwidth_opt = abap_true.
+    is_label_data_layout-zebra = abap_true.
+
+
+    "Pos Daten anzeigen
+    CALL METHOD gr_alv_label_data->set_table_for_first_display
+      EXPORTING
+        i_save           = space
+        i_default        = 'X'
+        i_structure_name = 'ZKPP_T_LAB_BEW'
+        is_layout        = is_label_data_layout
+      CHANGING
+        it_outtab        = gt_label_data
+*       it_fieldcatalog  = gi_header
+      EXCEPTIONS
+        OTHERS           = 4.
+
+
+    "Handler für Label Kopf Daten
+    SET HANDLER alv_events_head=>alv_events~on_double_click FOR gr_alv_label_mat.
+
+
+    SET HANDLER alv_events_data=>alv_events~on_double_click FOR gr_alv_label_data.
+    SET HANDLER alv_events_data=>alv_events~handle_data_changed   FOR gr_alv_label_data.
+
+
+    eo_alv_label_data = gr_alv_label_data.
+    eo_alv_label_mat = gr_alv_label_mat.
+    eo_docking = gr_docking.
