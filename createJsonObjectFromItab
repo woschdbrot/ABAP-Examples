@@ -1,0 +1,36 @@
+Method Parameters:
+*Import: IT_VALUES type <yourTableType>
+*Returning: rv_json_object type string
+  
+  METHOD create_json_string.
+
+
+    DATA: lt_result TYPE <yourTableType>.
+    DATA: lv_result_j TYPE string.
+    DATA: lv_json_as_char(10000) TYPE c.
+
+    DATA(o_writer_itab_j) = cl_sxml_string_writer=>create( type = if_sxml=>co_xt_json ).
+
+
+    CALL TRANSFORMATION id SOURCE values = it_values RESULT XML o_writer_itab_j.
+
+    cl_abap_conv_in_ce=>create( )->convert( EXPORTING
+                                              input = o_writer_itab_j->get_output( )
+                                            IMPORTING
+                                              data = lv_result_j ).
+
+    CALL TRANSFORMATION id SOURCE XML lv_result_j RESULT values = lt_result.
+
+
+    DATA(lv_length_s) = strlen( lv_result_j ).
+    DATA(lv_length_l_d) = lv_length_s - 1.
+
+    lv_json_as_char = lv_result_j.
+
+    CLEAR lv_json_as_char+lv_length_l_d(1).
+
+    REPLACE '{"VALUES":' IN lv_json_as_char WITH '' IN CHARACTER MODE.
+
+    rv_json_object = lv_json_as_char.
+
+  ENDMETHOD.
